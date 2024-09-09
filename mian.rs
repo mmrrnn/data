@@ -53,8 +53,8 @@ use progress_tracker::ProgressTracker;
 use serde::Serialize;
 use setup_status_event::SetupStatusEvent;
 use std::collections::HashMap;
-use std::fs::{read_dir, remove_file};
-use std::path::{Path, PathBuf};
+use std::fs::{read_dir, remove_dir_all, remove_file};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime};
@@ -792,46 +792,22 @@ fn log_web_message(level: String, message: Vec<String>) {
     }
 }
 
-fn remove_dir_contents(path: &PathBuf) -> std::io::Result<()> {
-    // Check if the path exists
-    if !Path::new(path).exists() {
-        println!("Path does not exist: {:?}", path);
-        return Ok(());
-    }
-
-    // Read the directory
-    for entry in read_dir(path)? {
+fn try_remove_dir_content(dir_path: PathBuf) -> std::io::Result<()> {
+    for entry in read_dir(dir_path)? {
         let entry = entry?;
-        let entry_path = entry.path();
-
-        // Check if the entry is a directory
-        if entry_path.is_dir() {
-            println!("Directory: {}", entry_path.display());
-            // Remove the directory
-            // remove_dir_all(entry_path)?;
-            match remove_dir_contents(&entry_path) {
-                Ok(_) => {
-                    println!("AAAAAAAAAAAAAAAAAAAAAAAAAa Removed {:?} ", entry_path);
-                }
-                Err(e) => {
-                    println!("EEEEEEEEEEEEEEEEEEEEEEEEEEEeeeE Could not remove {:?} directory: {:?}", entry_path, e);
-                }
-            };
-
+        let path = entry.path();
+        if path.is_dir() {
+            match remove_dir_all(path.clone()) {
+                Ok(_) => println!("Removed directory: {:?}", path),
+                Err(e) => println!("Error removing directory: {:?}: {:?}", path, e),
+            }
         } else {
-            println!("File: {}", entry_path.display());
-            // Remove the file
-            match remove_file(&entry_path) {
-                Ok(_) => {
-                    println!("AAAAAAAAAAAAAAAAAAAAAAAAAAaa Removed {:?} ", entry_path);
-                }
-                Err(e) => {
-                    println!("EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEee Removed {:?} directory: {:?}", entry_path, e);
-                }
+            match remove_file(path.clone()) {
+                Ok(_) => println!("Removed file: {:?}", path),
+                Err(e) => println!("Error removing file: {:?}: {}", path, e),
             }
         }
     }
-
     Ok(())
 }
 
@@ -841,20 +817,20 @@ async fn reset_settings<'r>(
     state: tauri::State<'_, UniverseAppState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    // state.shutdown.clone().trigger();
+    state.shutdown.clone().trigger();
     // TODO: Find a better way of knowing that all miners have stopped
-    // sleep(std::time::Duration::from_secs(5));
+    sleep(std::time::Duration::from_secs(5));
 
-    // let app_config_dir = app.path_resolver().app_config_dir();
+    let app_config_dir = app.path_resolver().app_config_dir();
     let app_cache_dir = app.path_resolver().app_cache_dir();
-    // let app_data_dir = app.path_resolver().app_data_dir();
-    // let app_local_data_dir = app.path_resolver().app_local_data_dir();
+    let app_data_dir = app.path_resolver().app_data_dir();
+    let app_local_data_dir = app.path_resolver().app_local_data_dir();
 
     let dirs_to_remove = [
-        // app_config_dir,
+        app_config_dir,
         app_cache_dir,
-        // app_data_dir,
-        // app_local_data_dir,
+        app_data_dir,
+        app_local_data_dir,
     ];
     let missing_dirs: Vec<String> = dirs_to_remove
         .iter()
@@ -871,22 +847,20 @@ async fn reset_settings<'r>(
         // check if dir exists
         if dir.clone().unwrap().exists() {
             info!(target: LOG_TARGET, "[reset_settings] Removing {:?} directory", dir);
-            let dir = dir.clone().unwrap();
-            match remove_dir_contents(&dir) {
+            match remove_dir_all(dir.clone().unwrap()) {
                 Ok(_) => {
-                    println!("XXXXXXXXXXXXXXx [reset_settings] Removed {:?} CONTENTS", dir);
                     info!(target: LOG_TARGET, "[reset_settings] Removed {:?} directory", dir);
                 }
                 Err(e) => {
-                    println!("YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY] Could not remove {:?} directory: {:?}", dir, e);
                     error!(target: LOG_TARGET, "[reset_settings] Could not remove {:?} directory: {:?}", dir, e);
+                    let _ = try_remove_dir_content(dir.clone().unwrap());
                 }
             }
         }
     });
 
     info!(target: LOG_TARGET, "[reset_settings] Restarting the app");
-    // app.restart();
+    app.restart();
 
     Ok(())
 }
